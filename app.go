@@ -58,7 +58,9 @@ type imageCache struct {
 // refresh builds the image synchronously and stores it. On error the previous
 // image is kept so a transient failure doesn't blank the frame.
 func (c *imageCache) refresh(ctx context.Context) error {
+	start := time.Now()
 	img, err := c.build(ctx)
+	recordBuild(c.name, "refresh", err, time.Since(start))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.buildErr = err
@@ -77,13 +79,16 @@ func (c *imageCache) regenerate(ctx context.Context) {
 	c.mu.Lock()
 	if c.regenerating {
 		c.mu.Unlock()
+		appRegenSkippedTotal.WithLabelValues(c.name).Inc()
 		return
 	}
 	c.regenerating = true
 	c.mu.Unlock()
 
 	go func() {
+		start := time.Now()
 		img, err := c.build(ctx)
+		recordBuild(c.name, "regenerate", err, time.Since(start))
 		c.mu.Lock()
 		c.regenerating = false
 		c.buildErr = err

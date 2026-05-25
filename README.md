@@ -135,6 +135,7 @@ The `X-App` response header names the app that produced the image. See
 | `GET /current-image` | — | Return the active app's current image **without** regenerating it |
 | `GET /toggle-rotate` | Toggle Rotate | Flip rotation on/off; return the active app's image |
 | `GET /healthz` | — | Per-app status + `rotate=…`; 503 only if no app has an image yet |
+| `GET /metrics` | — | Prometheus metrics (see [Observability](#observability)) |
 
 Each app keeps both its current image and the previous one (the image replaced by
 the last regeneration). `GET /prev-image` and `GET /current-image` are pure reads;
@@ -142,6 +143,31 @@ every other image endpoint regenerates the served app's image in the background
 after responding, so the next fetch shows something new. Before the first
 regeneration there is no previous image, so `GET /prev-image` returns the current
 one.
+
+## Observability
+
+**Request logging.** Every request is logged to stderr (via the standard `log`
+package, same prefix as the rest of the server) as one line:
+
+```
+inkyframe-server: [::1]:63069 GET /image -> 200 (192000 bytes, 0s)
+```
+
+— remote address, method, request URI (with query), status code, response bytes,
+and latency. Scrapes of `/metrics` are not logged, to keep the access log readable.
+
+**Prometheus metrics** are exposed at `GET /metrics` (plain Prometheus text
+format; not content-negotiated). Alongside the standard Go runtime and process
+collectors, the server exports:
+
+| Metric | Type | Labels | Meaning |
+|--------|------|--------|---------|
+| `inkyframe_http_requests_total` | counter | `method`, `route`, `status` | HTTP requests served. `route` is the matched mux pattern (e.g. `GET /image`), so cardinality is bounded; unmatched paths collapse into `<unmatched>` |
+| `inkyframe_http_request_duration_seconds` | histogram | `method`, `route` | Request latency |
+| `inkyframe_app_builds_total` | counter | `app`, `kind`, `outcome` | Image builds. `kind` is `refresh` (synchronous, at startup) or `regenerate` (background); `outcome` is `success` or `error` |
+| `inkyframe_app_build_duration_seconds` | histogram | `app`, `kind` | Build duration (network fetch + dither + pack) |
+| `inkyframe_app_last_successful_build_timestamp_seconds` | gauge | `app` | Unix time of the last successful build; alert on `time() - …` to catch a stale frame |
+| `inkyframe_app_regenerations_skipped_total` | counter | `app` | Background regenerations skipped because one was already in flight (single-flight) |
 
 ## Firmware contract
 

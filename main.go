@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -57,10 +59,11 @@ func main() {
 	mux.HandleFunc("GET /current-image", mgr.handleCurrentImage)
 	mux.HandleFunc("GET /toggle-rotate", mgr.handleToggleRotate)
 	mux.HandleFunc("GET /healthz", mgr.handleHealth)
+	mux.Handle("GET /metrics", promhttp.Handler())
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           mux,
+		Handler:           instrument(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
