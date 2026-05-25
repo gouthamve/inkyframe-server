@@ -33,10 +33,10 @@ const (
 // cost of a sub-second ffmpeg seek per step, which is fine for a frame that
 // advances only on a button press.
 //
-// Only the current frame is cached, so /image, /current-image, and /healthz
-// never trigger a decode; decoding happens solely in Refresh / Next / Prev. The
-// current frame index is persisted to statePath (when set) on every step, so a
-// restart resumes where it left off.
+// Only the current frame is cached, so /current-image and /healthz never trigger
+// a decode; decoding happens in Refresh / Next / Prev (both /image and
+// /next-image drive Next on a movie). The current frame index is persisted to
+// statePath (when set) on every step, so a restart resumes where it left off.
 //
 // Unlike immich it does not embed imageCache: there is no per-serve build to
 // regenerate. It implements App directly plus Navigator. navMu serializes

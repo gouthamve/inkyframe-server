@@ -36,6 +36,45 @@ func (a *fakeApp) regenCount() int {
 	return a.regens
 }
 
+// fakeNavApp is an App that also implements Navigator. It counts Next/Prev calls
+// and panics if the serve path ever regenerates it, so tests can assert that the
+// serve path steps it (like a movie) instead of doing serve-then-regenerate.
+type fakeNavApp struct {
+	name string
+
+	mu           sync.Mutex
+	nexts, prevs int
+}
+
+func (a *fakeNavApp) Name() string                  { return a.name }
+func (a *fakeNavApp) Refresh(context.Context) error { return nil }
+func (a *fakeNavApp) Current() ([]byte, time.Time)  { return []byte("cur"), time.Unix(0, 0) }
+func (a *fakeNavApp) Previous() ([]byte, time.Time) { return []byte("cur"), time.Unix(0, 0) }
+func (a *fakeNavApp) LastErr() error                { return nil }
+func (a *fakeNavApp) Regenerate(context.Context) {
+	panic("serve path must not regenerate a Navigator app")
+}
+
+func (a *fakeNavApp) Next() ([]byte, time.Time) {
+	a.mu.Lock()
+	a.nexts++
+	a.mu.Unlock()
+	return []byte("next"), time.Unix(0, 0)
+}
+
+func (a *fakeNavApp) Prev() ([]byte, time.Time) {
+	a.mu.Lock()
+	a.prevs++
+	a.mu.Unlock()
+	return []byte("prev"), time.Unix(0, 0)
+}
+
+func (a *fakeNavApp) navCounts() (int, int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.nexts, a.prevs
+}
+
 func threeApps() []App {
 	return []App{
 		&fakeApp{name: "a", img: []byte("A")},
@@ -107,6 +146,21 @@ func TestNextImageServesAndRegenerates(t *testing.T) {
 	// It must not change the active app.
 	if app2, _, _ := m.current(); app2.Name() != "a" {
 		t.Fatalf("nextImage changed active app: now %q, want a", app2.Name())
+	}
+}
+
+func TestCurrentStepsNavigator(t *testing.T) {
+	// /image on a Navigator app (movie) steps it forward rather than
+	// regenerating; fakeNavApp.Regenerate panics if that contract is broken.
+	nav := &fakeNavApp{name: "movie"}
+	m := newTestManager([]App{nav}, false)
+
+	app, img, _ := m.current()
+	if app.Name() != "movie" || string(img) != "next" {
+		t.Fatalf("current: got (%q, %q), want (movie, next)", app.Name(), img)
+	}
+	if n, _ := nav.navCounts(); n != 1 {
+		t.Fatalf("current should step the movie forward once, got %d Next calls", n)
 	}
 }
 

@@ -32,9 +32,12 @@ config.yaml ──▶ ├─ app: …               ▲   │
   fresh image. There is no timer — images only regenerate after they're served.
   Regeneration is single-flight (overlapping serves don't pile up) and keeps the
   last good image if a rebuild fails, rather than blanking the frame.
-- `GET /image` returns the active app's cached image. If **rotate** is on, it
-  serves the active app and then advances the pointer, so the next request shows
-  the next app. If rotate is off, it always returns the active app.
+- `GET /image` returns the active app's image and moves that app forward for next
+  time: a movie steps one frame (clamped at the last), any other app regenerates
+  in the background so the next serve is fresh. If **rotate** is on, it then
+  advances the pointer too, so the next request shows the next app; if rotate is
+  off, it stays on the active app.
+- `GET /` is a plain `200 OK` liveness check — it does **not** serve or advance.
 - The button endpoints change state **and return the resulting image**, so the
   frame renders in a single round-trip.
 
@@ -58,9 +61,9 @@ feature film would be ~26 GB if every frame were cached). By default it steps
 through **every** frame at the video's native rate; set `fps` to sample fewer
 (e.g. `fps: 2` jumps half a second per step). `GET /next-image` advances one
 frame and `GET /prev-image` steps back, both **clamped** at the ends (no
-wrap-around). `GET /image` shows the current frame *without* advancing — so with
-several apps and `rotate` on, the periodic wake still cycles between apps while
-the movie only moves when its button is pressed.
+wrap-around). `GET /image` also steps one frame forward (clamped), so the
+periodic wake walks the film along; with several apps and `rotate` on, each wake
+both advances the movie and rotates to the next app.
 
 If you set `state_file`, the current frame index is written there (atomically) on
 every step and restored on startup, so the movie **resumes where it left off**
@@ -156,7 +159,8 @@ The `X-App` response header names the app that produced the image. See
 
 | Path | Button | Description |
 |------|--------|-------------|
-| `GET /image` (also `GET /`) | — | Active app's image; advances the active app if rotate is on |
+| `GET /image` | — | Active app's image; moves it forward (movie: step a frame; otherwise regenerate), and advances to the next app if rotate is on |
+| `GET /` | — | `200 OK` liveness check; does not serve or advance |
 | `GET /next-app` | Next App | Advance to the next app; return its image |
 | `GET /prev-app` | Previous App | Move to the previous app; return its image |
 | `GET /next-image` | Next Image | Advance the active app's image. For a movie, step to the next frame (clamped at the last); otherwise return the current image and regenerate it, so each fetch shows a fresh one |
@@ -257,9 +261,9 @@ palette. Algorithm is selectable via the top-level `dither` config key.
   sub-second decode each time you step (fine for a frame that advances on a button
   press). Seeking is by timestamp (`frame ÷ fps`), so on pathological
   variable-frame-rate sources a step may land on an adjacent frame. Navigation
-  **clamps** at the first/last frame, the periodic `/image` wake does not advance
-  the movie — only the buttons do — and, with `state_file` set, the position is
-  persisted and resumed across restarts.
+  **clamps** at the first/last frame; both the `/next-image` button and the
+  periodic `/image` wake step the film forward; and, with `state_file` set, the
+  position is persisted and resumed across restarts.
 - Output is **never JPEG**: lossy compression would smear the dithered pixels and
   shift colours off the 7-colour palette, so the server sends the raw framebuffer
   (or a lossless indexed PNG for browsers) instead.

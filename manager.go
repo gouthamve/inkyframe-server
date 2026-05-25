@@ -37,10 +37,13 @@ func newManager(ctx context.Context, apps []App, rotate bool) *manager {
 	return &manager{ctx: ctx, apps: apps, rotate: rotate}
 }
 
-// current serves GET /image: it returns the active app's cached image and
-// regenerates it for next time. If rotation is on it advances the active
-// pointer afterwards (the app being served is captured before advancing, so the
-// next request shows the next app). With rotation off it doesn't advance.
+// current serves GET /image: it returns the active app's image and moves that
+// app forward for next time. For a Navigator app (a movie) it steps to the next
+// frame and returns it synchronously (clamped at the last); for other apps it
+// returns the cached image and regenerates it in the background. If rotation is
+// on it then advances the active pointer (the app being served is captured
+// before advancing, so the next request shows the next app); with rotation off
+// it doesn't advance the pointer.
 func (m *manager) current() (App, []byte, time.Time) {
 	m.mu.Lock()
 	app := m.apps[m.active]
@@ -48,6 +51,10 @@ func (m *manager) current() (App, []byte, time.Time) {
 		m.active = (m.active + 1) % len(m.apps)
 	}
 	m.mu.Unlock()
+	if nav, ok := app.(Navigator); ok {
+		img, at := nav.Next()
+		return app, img, at
+	}
 	img, at := app.Current()
 	app.Regenerate(m.ctx)
 	return app, img, at
