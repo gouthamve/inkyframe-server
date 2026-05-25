@@ -75,6 +75,44 @@ func gradient(w, h int) image.Image {
 	return img
 }
 
+func TestAdjustColorsSaturationAndBrightness(t *testing.T) {
+	// A muted mid-grey-ish blue: saturation should spread the channels apart and
+	// brightness should lift the overall level.
+	src := solidImage(4, 4, color.RGBA{R: 80, G: 90, B: 140, A: 255})
+
+	// No-op fast path: identical pixels back.
+	if out := adjustColors(src, 1, 1); out != image.Image(src) {
+		t.Fatal("saturation=1, brightness=1 should return src unchanged")
+	}
+
+	// Saturation only (brightness=1): channels move away from their shared luma,
+	// preserving luma but increasing the spread.
+	satOnly := adjustColors(src, 2.0, 1)
+	r0, g0, b0, _ := src.At(0, 0).RGBA()
+	r1, g1, b1, _ := satOnly.At(0, 0).RGBA()
+	spread := func(r, g, b uint32) uint32 { return max(r, max(g, b)) - min(r, min(g, b)) }
+	if spread(r1>>8, g1>>8, b1>>8) <= spread(r0>>8, g0>>8, b0>>8) {
+		t.Fatalf("saturation>1 did not increase channel spread: before %d, after %d",
+			spread(r0>>8, g0>>8, b0>>8), spread(r1>>8, g1>>8, b1>>8))
+	}
+
+	// Brightness only (saturation=1): every channel should rise (gamma lift), and
+	// nothing should exceed 255.
+	bright := adjustColors(src, 1, 1.5)
+	br, bg, bb, _ := bright.At(0, 0).RGBA()
+	if br>>8 <= r0>>8 || bg>>8 <= g0>>8 || bb>>8 <= b0>>8 {
+		t.Fatalf("brightness>1 did not lift channels: %d,%d,%d -> %d,%d,%d",
+			r0>>8, g0>>8, b0>>8, br>>8, bg>>8, bb>>8)
+	}
+
+	// White stays white under a brightness lift (no clipping artefacts the other way).
+	white := adjustColors(solidImage(2, 2, color.White), 1, 2.0)
+	wr, wg, wb, _ := white.At(0, 0).RGBA()
+	if wr>>8 != 255 || wg>>8 != 255 || wb>>8 != 255 {
+		t.Fatalf("brightness lift moved white off 255: %d,%d,%d", wr>>8, wg>>8, wb>>8)
+	}
+}
+
 func TestDitherProducesPaletteIndices(t *testing.T) {
 	for _, algo := range []ditherAlgo{ditherFloydSteinberg, ditherAtkinson} {
 		p := ditherImage(gradient(canvasWidth, canvasHeight), algo)

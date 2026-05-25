@@ -26,11 +26,30 @@ type appConfig struct {
 	Immich *immichConfig `yaml:"immich"`
 }
 
-// immichConfig is the settings block for an "immich" app.
+// immichConfig is the settings block for an "immich" app. Saturation and
+// Brightness are pointers so an absent key is distinguishable from an explicit
+// value (and falls back to the defaults below); see adjustColors for semantics.
 type immichConfig struct {
-	URL     string `yaml:"url"`
-	APIKey  string `yaml:"api_key"`
-	AlbumID string `yaml:"album_id"`
+	URL        string   `yaml:"url"`
+	APIKey     string   `yaml:"api_key"`
+	AlbumID    string   `yaml:"album_id"`
+	Saturation *float64 `yaml:"saturation"`
+	Brightness *float64 `yaml:"brightness"`
+}
+
+// Default colour adjustments for an immich app when the keys are omitted. The
+// ACeP panel is dark and muted, so we boost both out of the box.
+const (
+	defaultSaturation = 1.4
+	defaultBrightness = 1.2
+)
+
+// floatOr returns *p, or def when p is nil.
+func floatOr(p *float64, def float64) float64 {
+	if p == nil {
+		return def
+	}
+	return *p
 }
 
 // rawConfig mirrors the on-disk YAML. Rotate is a pointer so an absent key
@@ -119,6 +138,12 @@ func validateApps(apps []appConfig) error {
 			}
 			if ic.URL == "" || ic.APIKey == "" || ic.AlbumID == "" {
 				return fmt.Errorf("app %q: immich requires url, api_key, and album_id", a.Name)
+			}
+			if ic.Saturation != nil && *ic.Saturation < 0 {
+				return fmt.Errorf("app %q: saturation must be >= 0", a.Name)
+			}
+			if ic.Brightness != nil && *ic.Brightness <= 0 {
+				return fmt.Errorf("app %q: brightness must be > 0", a.Name)
 			}
 		case "":
 			return fmt.Errorf("app %q: type is required", a.Name)

@@ -13,3 +13,7 @@ apps:
       url: https://immich.example.com   # Immich server base URL
       api_key: your-api-key             # needs asset.view + album read; keep secret
       album_id: your-album-uuid         # album to pull images from
+      # Colour boost applied before dithering, to counteract the panel's dark,
+      # muted palette. 1.0 = unchanged; omit to use the defaults shown.
+      saturation: 1.4                   # chroma multiplier (>1 = more vivid, 0 = greyscale)
+      brightness: 1.2                   # gamma lift (>1 = brighter shadows/midtones, no clipping)

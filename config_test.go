@@ -82,6 +82,50 @@ apps:
 	}
 }
 
+func TestImmichColourDefaults(t *testing.T) {
+	cfg, err := loadConfig(writeConfig(t, minimalImmich))
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	apps, err := buildApps(cfg)
+	if err != nil {
+		t.Fatalf("buildApps: %v", err)
+	}
+	a, ok := apps[0].(*immichApp)
+	if !ok {
+		t.Fatalf("app is %T, want *immichApp", apps[0])
+	}
+	if a.saturation != defaultSaturation || a.brightness != defaultBrightness {
+		t.Fatalf("defaults: got sat=%v bri=%v, want %v/%v",
+			a.saturation, a.brightness, defaultSaturation, defaultBrightness)
+	}
+}
+
+func TestImmichColourExplicit(t *testing.T) {
+	cfg, err := loadConfig(writeConfig(t, `
+apps:
+  - name: photos
+    type: immich
+    immich:
+      url: https://immich.example.com
+      api_key: key
+      album_id: album
+      saturation: 1.0
+      brightness: 1.8
+`))
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	apps, err := buildApps(cfg)
+	if err != nil {
+		t.Fatalf("buildApps: %v", err)
+	}
+	a := apps[0].(*immichApp)
+	if a.saturation != 1.0 || a.brightness != 1.8 {
+		t.Fatalf("explicit: got sat=%v bri=%v, want 1.0/1.8", a.saturation, a.brightness)
+	}
+}
+
 func TestLoadConfigExplicitRotateFalse(t *testing.T) {
 	cfg, err := loadConfig(writeConfig(t, "rotate: false\n"+minimalImmich))
 	if err != nil {
@@ -140,6 +184,16 @@ apps:
 			name: "unknown dither algorithm",
 			yaml: "dither: ordered\n" + minimalImmich,
 			want: `unknown dither "ordered"`,
+		},
+		{
+			name: "negative saturation",
+			yaml: "apps:\n  - name: p\n    type: immich\n    immich: {url: u, api_key: k, album_id: a, saturation: -1}\n",
+			want: "saturation must be >= 0",
+		},
+		{
+			name: "zero brightness",
+			yaml: "apps:\n  - name: p\n    type: immich\n    immich: {url: u, api_key: k, album_id: a, brightness: 0}\n",
+			want: "brightness must be > 0",
 		},
 		{
 			name: "unknown top-level key",
