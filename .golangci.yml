@@ -4,6 +4,16 @@ version: "2"
 # and enforce gofmt formatting as part of `golangci-lint run`.
 linters:
   default: standard
+  exclusions:
+    presets:
+      # Don't flag the idiomatic unchecked errors this codebase relies on:
+      # deferred resp.Body.Close() and Fprintf() to an http.ResponseWriter.
+      - std-error-handling
+    rules:
+      # QF1008 is a stylistic "drop the embedded field name" suggestion; the
+      # explicit imageCache.* selectors are intentional (see CLAUDE.md).
+      - linters: [staticcheck]
+        text: QF1008
 
 formatters:
   enable:
