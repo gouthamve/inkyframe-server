@@ -114,6 +114,21 @@ func TestLoadConfigErrors(t *testing.T) {
 			want: "requires url, api_key, and album_id",
 		},
 		{
+			name: "missing movie block",
+			yaml: "apps:\n  - name: m\n    type: movie\n",
+			want: "missing movie config block",
+		},
+		{
+			name: "missing movie path",
+			yaml: "apps:\n  - name: m\n    type: movie\n    movie:\n      fps: 1\n",
+			want: "movie requires path",
+		},
+		{
+			name: "negative movie fps",
+			yaml: "apps:\n  - name: m\n    type: movie\n    movie:\n      path: /x.mp4\n      fps: -1\n",
+			want: "movie fps must be >= 0",
+		},
+		{
 			name: "unknown type",
 			yaml: "apps:\n  - name: p\n    type: weather\n",
 			want: `unknown type "weather"`,
@@ -157,6 +172,37 @@ apps:
 				t.Fatalf("error %q does not contain %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadConfigMovie(t *testing.T) {
+	cfg, err := loadConfig(writeConfig(t, `
+apps:
+  - name: clip
+    type: movie
+    movie:
+      path: /movies/clip.mp4
+      fps: 2
+      state_file: /state/clip.idx
+`))
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	mc := cfg.Apps[0].Movie
+	if mc == nil {
+		t.Fatal("movie config block is nil")
+	}
+	if mc.Path != "/movies/clip.mp4" || mc.FPS != 2 || mc.StateFile != "/state/clip.idx" {
+		t.Errorf("movie config: got %+v", *mc)
+	}
+	// buildApps wires the movie app without touching ffmpeg (probing happens in
+	// Refresh), so it should succeed even without the file present.
+	apps, err := buildApps(cfg)
+	if err != nil {
+		t.Fatalf("buildApps: %v", err)
+	}
+	if len(apps) != 1 || apps[0].Name() != "clip" {
+		t.Fatalf("got %d apps (first %q), want 1 named clip", len(apps), apps[0].Name())
 	}
 }
 

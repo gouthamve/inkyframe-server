@@ -82,9 +82,9 @@ func cropToFill(src image.Image, w, h int) image.Image {
 // stitching to one RGBA canvas and dithering the whole thing — keeps error
 // diffusion from bleeding across the centre seam, so each photo is quantised
 // against only its own tonal range.
-func composeDithered(left, right image.Image, algo ditherAlgo) *image.Paletted {
-	l := ditherImage(cropToFill(left, halfWidth, halfHeight), algo)
-	r := ditherImage(cropToFill(right, halfWidth, halfHeight), algo)
+func composeDithered(dz *ditherer, left, right image.Image) *image.Paletted {
+	l := dz.ditherImage(cropToFill(left, halfWidth, halfHeight))
+	r := dz.ditherImage(cropToFill(right, halfWidth, halfHeight))
 	return stitchPaletted(l, r)
 }
 
@@ -111,12 +111,22 @@ const (
 	ditherAtkinson                         // higher contrast, cleaner on e-ink
 )
 
-// dither maps src onto the 7-colour inkyPalette via error diffusion, producing
-// an 800×480 paletted image whose pixel values are PEN indices 0–6. It uses the
-// dither library, which works in linear (gamma-correct) RGB with perceptually
-// weighted colour matching — important for a sparse palette. Serpentine scanning
-// reduces directional artefacts.
-func ditherImage(src image.Image, algo ditherAlgo) *image.Paletted {
+// ditherer maps images onto the 7-colour inkyPalette via error diffusion. It
+// wraps one library *dither.Ditherer that is built once (newDitherer) and shared
+// by every app. NewDitherer precomputes the palette in linear (gamma-correct)
+// RGB, so reusing the instance avoids redoing that work per image — and the
+// library's DitherPaletted allocates its working buffers per call and is safe to
+// reuse and call concurrently, so a single shared ditherer serves all apps even
+// across concurrent background regenerations.
+type ditherer struct {
+	d *dither.Ditherer
+}
+
+// newDitherer builds the shared ditherer for the configured algorithm. The
+// library works in linear RGB with perceptually weighted colour matching —
+// important for a sparse palette — and serpentine scanning reduces directional
+// artefacts.
+func newDitherer(algo ditherAlgo) *ditherer {
 	d := dither.NewDitherer(inkyPalette)
 	d.Serpentine = true
 	switch algo {
@@ -125,9 +135,14 @@ func ditherImage(src image.Image, algo ditherAlgo) *image.Paletted {
 	default:
 		d.Matrix = dither.FloydSteinberg
 	}
-	// DitherPaletted returns an *image.Paletted whose indices align with
-	// inkyPalette's order (= PEN numbers), so packFramebuffer can use them directly.
-	return d.DitherPaletted(src)
+	return &ditherer{d: d}
+}
+
+// ditherImage maps src onto the 7-colour inkyPalette, producing a paletted image
+// whose pixel values are PEN indices 0–6. DitherPaletted returns indices aligned
+// with inkyPalette's order (= PEN numbers), so packFramebuffer can use them directly.
+func (dz *ditherer) ditherImage(src image.Image) *image.Paletted {
+	return dz.d.DitherPaletted(src)
 }
 
 // packFramebuffer packs a dithered image into the panel's 4-bits-per-pixel

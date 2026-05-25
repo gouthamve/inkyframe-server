@@ -45,7 +45,8 @@ func TestComposeDitheredStitches(t *testing.T) {
 	left := solidImage(600, 900, color.RGBA{R: 255, A: 255})
 	right := solidImage(1000, 700, color.RGBA{B: 255, A: 255})
 
-	out := composeDithered(left, right, ditherFloydSteinberg)
+	dz := newDitherer(ditherFloydSteinberg)
+	out := composeDithered(dz, left, right)
 	b := out.Bounds()
 	if b.Dx() != canvasWidth || b.Dy() != canvasHeight {
 		t.Fatalf("composite is %dx%d, want %dx%d", b.Dx(), b.Dy(), canvasWidth, canvasHeight)
@@ -54,8 +55,8 @@ func TestComposeDitheredStitches(t *testing.T) {
 	// Each half of the stitched result must equal that half dithered on its own:
 	// stitchPaletted copies PEN indices verbatim, with no re-matching across the
 	// seam. Dithering is deterministic, so re-running it reproduces the indices.
-	wantL := ditherImage(cropToFill(left, halfWidth, halfHeight), ditherFloydSteinberg)
-	wantR := ditherImage(cropToFill(right, halfWidth, halfHeight), ditherFloydSteinberg)
+	wantL := dz.ditherImage(cropToFill(left, halfWidth, halfHeight))
+	wantR := dz.ditherImage(cropToFill(right, halfWidth, halfHeight))
 	for y := 0; y < canvasHeight; y++ {
 		for x := 0; x < halfWidth; x++ {
 			if got, want := out.ColorIndexAt(x, y), wantL.ColorIndexAt(x, y); got != want {
@@ -82,7 +83,7 @@ func gradient(w, h int) image.Image {
 
 func TestDitherProducesPaletteIndices(t *testing.T) {
 	for _, algo := range []ditherAlgo{ditherFloydSteinberg, ditherAtkinson} {
-		p := ditherImage(gradient(canvasWidth, canvasHeight), algo)
+		p := newDitherer(algo).ditherImage(gradient(canvasWidth, canvasHeight))
 		b := p.Bounds()
 		if b.Dx() != canvasWidth || b.Dy() != canvasHeight {
 			t.Fatalf("algo %d: dithered image is %dx%d, want %dx%d", algo, b.Dx(), b.Dy(), canvasWidth, canvasHeight)
@@ -101,22 +102,22 @@ func TestDitherProducesPaletteIndices(t *testing.T) {
 // distinct algorithm (it must not silently fall back to Floyd–Steinberg).
 func TestAtkinsonDiffersFromFloydSteinberg(t *testing.T) {
 	src := gradient(canvasWidth, canvasHeight)
-	fs := ditherImage(src, ditherFloydSteinberg)
-	at := ditherImage(src, ditherAtkinson)
+	fs := newDitherer(ditherFloydSteinberg).ditherImage(src)
+	at := newDitherer(ditherAtkinson).ditherImage(src)
 	if bytes.Equal(fs.Pix, at.Pix) {
 		t.Fatal("Atkinson and Floyd–Steinberg produced identical output")
 	}
 }
 
 func TestPackFramebufferLength(t *testing.T) {
-	fb := packFramebuffer(ditherImage(gradient(canvasWidth, canvasHeight), ditherFloydSteinberg))
+	fb := packFramebuffer(newDitherer(ditherFloydSteinberg).ditherImage(gradient(canvasWidth, canvasHeight)))
 	if want := canvasWidth * canvasHeight / 2; len(fb) != want {
 		t.Fatalf("framebuffer is %d bytes, want %d", len(fb), want)
 	}
 }
 
 func TestPackUnpackRoundTrip(t *testing.T) {
-	p := ditherImage(gradient(canvasWidth, canvasHeight), ditherAtkinson)
+	p := newDitherer(ditherAtkinson).ditherImage(gradient(canvasWidth, canvasHeight))
 	got := unpackFramebuffer(packFramebuffer(p))
 	if !bytes.Equal(got.Pix, p.Pix) {
 		t.Fatal("pack/unpack did not round-trip the palette indices losslessly")
@@ -124,7 +125,7 @@ func TestPackUnpackRoundTrip(t *testing.T) {
 }
 
 func TestEncodePNGRoundTrip(t *testing.T) {
-	fb := packFramebuffer(ditherImage(gradient(canvasWidth, canvasHeight), ditherFloydSteinberg))
+	fb := packFramebuffer(newDitherer(ditherFloydSteinberg).ditherImage(gradient(canvasWidth, canvasHeight)))
 	data, err := encodePNG(unpackFramebuffer(fb))
 	if err != nil {
 		t.Fatalf("encodePNG: %v", err)

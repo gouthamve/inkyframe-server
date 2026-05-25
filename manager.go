@@ -76,13 +76,18 @@ func (m *manager) prevApp() (App, []byte, time.Time) {
 	return app, img, at
 }
 
-// nextImage serves the active app's cached image and regenerates it. Because
-// every serve regenerates, the cached image is already the "next" one. It
-// changes neither active nor rotate.
+// nextImage advances the active app's image. For a Navigator app (e.g. a movie)
+// it steps to the next frame and returns it synchronously. Otherwise it serves
+// the cached image and regenerates it — because every serve regenerates, the
+// cached image is already the "next" one. It changes neither active nor rotate.
 func (m *manager) nextImage() (App, []byte, time.Time) {
 	m.mu.Lock()
 	app := m.apps[m.active]
 	m.mu.Unlock()
+	if nav, ok := app.(Navigator); ok {
+		img, at := nav.Next()
+		return app, img, at
+	}
 	img, at := app.Current()
 	app.Regenerate(m.ctx)
 	return app, img, at
@@ -98,13 +103,19 @@ func (m *manager) currentImage() (App, []byte, time.Time) {
 	return app, img, at
 }
 
-// prevImage returns the active app's previous image (the one replaced by the
-// most recent regeneration) WITHOUT regenerating. Before any regeneration has
-// happened there is no previous image, so it falls back to the current one.
+// prevImage steps the active app's image backwards. For a Navigator app (e.g. a
+// movie) it steps to the previous frame and returns it synchronously. Otherwise
+// it returns the app's previous image (the one replaced by the most recent
+// regeneration) WITHOUT regenerating; before any regeneration has happened there
+// is no previous image, so it falls back to the current one.
 func (m *manager) prevImage() (App, []byte, time.Time) {
 	m.mu.Lock()
 	app := m.apps[m.active]
 	m.mu.Unlock()
+	if nav, ok := app.(Navigator); ok {
+		img, at := nav.Prev()
+		return app, img, at
+	}
 	img, at := app.Previous()
 	if img == nil {
 		img, at = app.Current()
