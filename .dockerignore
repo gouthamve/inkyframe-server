@@ -1,0 +1,14 @@
+# Keep the build context small and never copy secrets or local artifacts into
+# the build (config.yaml holds the Immich API key).
+.git
+.github
+*.md
+config.yaml
+/inkyframe-server
+*.jpg
+*.jpeg
+.DS_Store
+renovate.json
+.golangci.yml
+Dockerfile
+.dockerignore

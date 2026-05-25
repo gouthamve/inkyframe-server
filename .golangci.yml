@@ -1,0 +1,10 @@
+version: "2"
+
+# Run the standard linters (errcheck, govet, ineffassign, staticcheck, unused)
+# and enforce gofmt formatting as part of `golangci-lint run`.
+linters:
+  default: standard
+
+formatters:
+  enable:
+    - gofmt

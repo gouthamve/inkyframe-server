@@ -95,6 +95,25 @@ curl -s localhost:8080/image -o frame.bin && wc -c frame.bin
 curl -s -H 'Accept: text/html' localhost:8080/image -o out.png && file out.png
 ```
 
+## Docker
+
+A multi-arch image (`linux/amd64` + `linux/arm64`) is built and pushed to the
+GitHub Container Registry by CI — on every push to `main` and on `v*` tags:
+
+```sh
+docker run --rm -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/inkyframe/config.yaml:ro" \
+  ghcr.io/gouthamve/inkyframe-server:main
+```
+
+It is a static [`distroless`](https://github.com/GoogleContainerTools/distroless)
+build that runs as a non-root user and reads its config from
+`/etc/inkyframe/config.yaml`. Mount your own config there (it holds the API key,
+so it is never baked into the image); pass a different `-config` path if you
+mount it elsewhere. Available tags: `main` (rolling — latest commit on `main`),
+`main-<commit>` (immutable — pins a specific `main` build),
+and `vX.Y.Z` / `vX.Y` / `latest` (release tags).
+
 ## Endpoints
 
 All endpoints are `GET` (simplest for the frame firmware) and the action
