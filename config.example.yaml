@@ -1,0 +1,15 @@
+# inkyframe-server configuration.
+# Copy to config.yaml and edit. Run with: go run . -config config.yaml
+
+listen_addr: ":8080"      # HTTP listen address (default :8080)
+rotate: true              # if true, /image advances to the next app each request (default true)
+dither: floyd-steinberg   # dithering algorithm: floyd-steinberg (default) or atkinson
+
+apps:
+  # The default app is the first one listed.
+  - name: family-photos
+    type: immich
+    immich:
+      url: https://immich.example.com   # Immich server base URL
+      api_key: your-api-key             # needs asset.view + album read; keep secret
+      album_id: your-album-uuid         # album to pull images from

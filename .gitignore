@@ -1,0 +1,12 @@
+# Compiled binary (named after the module/dir)
+/inkyframe-server
+
+# Local config (holds the Immich API key); commit config.example.yaml instead
+/config.yaml
+
+# Local test output
+*.jpg
+*.jpeg
+
+# Editor/OS cruft
+.DS_Store
