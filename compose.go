@@ -5,7 +5,6 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"math"
 
 	"github.com/makeworld-the-better-one/dither/v2"
 	"golang.org/x/image/draw"
@@ -88,66 +87,6 @@ func compose(left, right image.Image) image.Image {
 	draw.Draw(canvas, image.Rect(0, 0, halfWidth, canvasHeight), l, image.Point{}, draw.Src)
 	draw.Draw(canvas, image.Rect(halfWidth, 0, canvasWidth, canvasHeight), r, image.Point{}, draw.Src)
 	return canvas
-}
-
-// adjustColors boosts saturation and brightness of src before dithering, to
-// counteract the Inky panel's dark, muted ACeP palette (otherwise photos render
-// flat and dim). It runs in plain sRGB space — these are perceptual "slider"
-// adjustments, not colour-managed ones:
-//
-//   - saturation scales each pixel's chroma around its Rec. 601 luma. 1.0 leaves
-//     it unchanged, >1 pushes colours toward the vivid palette entries (so muted
-//     regions stop collapsing to grey/black), 0 yields greyscale.
-//   - brightness is a gamma lift: out = (in/255) ** (1/brightness). 1.0 is
-//     unchanged, >1 lifts shadows and midtones while pinning white at white (no
-//     highlight clipping). Applied after saturation so boosted colours brighten too.
-//
-// Returns src unchanged when both are 1.0 (a no-op fast path).
-func adjustColors(src image.Image, saturation, brightness float64) image.Image {
-	if saturation == 1 && brightness == 1 {
-		return src
-	}
-
-	// Precompute the brightness gamma curve as a 256-entry lookup table.
-	var gamma [256]uint8
-	exp := 1.0 / brightness
-	for i := range gamma {
-		gamma[i] = clamp8(math.Pow(float64(i)/255, exp) * 255)
-	}
-
-	b := src.Bounds()
-	dst := image.NewRGBA(b)
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			r, g, bl, a := src.At(x, y).RGBA() // 16-bit, alpha-premultiplied
-			rf, gf, bf := float64(r>>8), float64(g>>8), float64(bl>>8)
-
-			luma := 0.299*rf + 0.587*gf + 0.114*bf
-			rf = luma + (rf-luma)*saturation
-			gf = luma + (gf-luma)*saturation
-			bf = luma + (bf-luma)*saturation
-
-			dst.SetRGBA(x, y, color.RGBA{
-				R: gamma[clamp8(rf)],
-				G: gamma[clamp8(gf)],
-				B: gamma[clamp8(bf)],
-				A: uint8(a >> 8),
-			})
-		}
-	}
-	return dst
-}
-
-// clamp8 rounds v to the nearest integer and clamps it to a uint8 [0,255].
-func clamp8(v float64) uint8 {
-	switch {
-	case v <= 0:
-		return 0
-	case v >= 255:
-		return 255
-	default:
-		return uint8(v + 0.5)
-	}
 }
 
 // ditherAlgo selects the error-diffusion algorithm used to quantise to the

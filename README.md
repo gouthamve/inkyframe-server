@@ -42,10 +42,9 @@ The immich app fetches Immich's **preview** endpoint
 the camera's EXIF orientation already baked in (portrait shots come out upright),
 are JPEG/WebP even when the original is HEIC, and only need the `asset.view`
 permission. Each image is **cropped to fill** its 400×480 half (centered,
-aspect-preserving — no distortion, no letterbox). The composite's saturation and
-brightness are then boosted (configurable, to counteract the panel's dark, muted
-palette) and it is dithered (Floyd–Steinberg or Atkinson, configurable) to the
-7-colour palette and packed into the framebuffer. Videos are ignored; an immich album must contain at least
+aspect-preserving — no distortion, no letterbox). The composite is then dithered
+(Floyd–Steinberg or Atkinson, configurable) to the 7-colour palette and packed
+into the framebuffer. Videos are ignored; an immich album must contain at least
 2 images.
 
 ## Configuration
@@ -67,20 +66,15 @@ apps:
       url: https://immich.example.com   # Immich server base URL
       api_key: your-api-key             # needs asset.view + album read; keep secret
       album_id: your-album-uuid         # album to pull images from
-      saturation: 1.4                   # chroma boost before dithering (default 1.4; 1.0 = unchanged)
-      brightness: 1.2                   # gamma lift before dithering (default 1.2; 1.0 = unchanged)
+      jpeg_quality: 85                  # output JPEG quality 1-100 (default 85)
 ```
 
 Top-level keys: `listen_addr`, `rotate`, `dither`, and a non-empty `apps` list.
 `dither` chooses the error-diffusion algorithm applied to every app's image:
 `floyd-steinberg` (default; smooth gradients) or `atkinson` (higher contrast,
 often cleaner on e-ink). Each app needs a unique `name` and a `type`; an `immich`
-app needs a `immich:` block with `url`, `api_key`, and `album_id`. The optional
-`saturation` and `brightness` keys boost the composite before dithering to
-counteract the panel's dark, muted palette: `saturation` is a chroma multiplier
-(>1 more vivid, 0 greyscale) and `brightness` a gamma lift (>1 brightens
-shadows/midtones without clipping highlights). Both default to a mild boost.
-Unknown keys are rejected so typos surface immediately.
+app needs a `immich:` block with `url`, `api_key`, and `album_id`. Unknown keys
+are rejected so typos surface immediately.
 
 ## Run
 

@@ -15,18 +15,14 @@ type immichApp struct {
 	client     *Client
 	albumID    string
 	algo       ditherAlgo // dithering algorithm for the composed image
-	saturation float64    // chroma boost applied before dithering (see adjustColors)
-	brightness float64    // gamma lift applied before dithering (see adjustColors)
 	imageCache            // embedded: refresh/regenerate/current/lastErr + locking
 }
 
 func newImmichApp(name string, cfg immichConfig, algo ditherAlgo) *immichApp {
 	a := &immichApp{
-		client:     NewClient(cfg.URL, cfg.APIKey),
-		albumID:    cfg.AlbumID,
-		algo:       algo,
-		saturation: floatOr(cfg.Saturation, defaultSaturation),
-		brightness: floatOr(cfg.Brightness, defaultBrightness),
+		client:  NewClient(cfg.URL, cfg.APIKey),
+		albumID: cfg.AlbumID,
+		algo:    algo,
 	}
 	a.imageCache.name = name
 	a.imageCache.build = a.build
@@ -61,8 +57,7 @@ func (a *immichApp) build(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 
-	composed := adjustColors(compose(left, right), a.saturation, a.brightness)
-	return packFramebuffer(ditherImage(composed, a.algo)), nil
+	return packFramebuffer(ditherImage(compose(left, right), a.algo)), nil
 }
 
 func (a *immichApp) Name() string                      { return a.imageCache.name }
