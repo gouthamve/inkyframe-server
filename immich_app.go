@@ -57,7 +57,7 @@ func (a *immichApp) build(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 
-	return packFramebuffer(ditherImage(compose(left, right), a.algo)), nil
+	return packFramebuffer(composeDithered(left, right, a.algo)), nil
 }
 
 func (a *immichApp) Name() string                      { return a.imageCache.name }

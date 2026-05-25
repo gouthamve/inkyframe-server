@@ -76,17 +76,30 @@ func cropToFill(src image.Image, w, h int) image.Image {
 	return dst
 }
 
-// compose crops left and right to 400×480 each and places them side by side on
-// an 800×480 canvas.
-func compose(left, right image.Image) image.Image {
-	canvas := image.NewRGBA(image.Rect(0, 0, canvasWidth, canvasHeight))
+// composeDithered crops left and right to fill each 400×480 half, dithers each
+// half independently to the 7-colour palette, and stitches the two paletted
+// halves into one 800×480 paletted image. Dithering per-half — rather than
+// stitching to one RGBA canvas and dithering the whole thing — keeps error
+// diffusion from bleeding across the centre seam, so each photo is quantised
+// against only its own tonal range.
+func composeDithered(left, right image.Image, algo ditherAlgo) *image.Paletted {
+	l := ditherImage(cropToFill(left, halfWidth, halfHeight), algo)
+	r := ditherImage(cropToFill(right, halfWidth, halfHeight), algo)
+	return stitchPaletted(l, r)
+}
 
-	l := cropToFill(left, halfWidth, halfHeight)
-	r := cropToFill(right, halfWidth, halfHeight)
-
-	draw.Draw(canvas, image.Rect(0, 0, halfWidth, canvasHeight), l, image.Point{}, draw.Src)
-	draw.Draw(canvas, image.Rect(halfWidth, 0, canvasWidth, canvasHeight), r, image.Point{}, draw.Src)
-	return canvas
+// stitchPaletted places two 400×480 paletted halves side by side into one
+// 800×480 paletted image. Both halves share inkyPalette (ditherImage guarantees
+// it), and cropToFill yields zero-origin 400×480 images, so the PEN indices are
+// copied row by row verbatim — no colour re-matching across the seam.
+func stitchPaletted(left, right *image.Paletted) *image.Paletted {
+	dst := image.NewPaletted(image.Rect(0, 0, canvasWidth, canvasHeight), inkyPalette)
+	for y := 0; y < canvasHeight; y++ {
+		row := dst.Pix[y*dst.Stride:]
+		copy(row[:halfWidth], left.Pix[y*left.Stride:y*left.Stride+halfWidth])
+		copy(row[halfWidth:canvasWidth], right.Pix[y*right.Stride:y*right.Stride+halfWidth])
+	}
+	return dst
 }
 
 // ditherAlgo selects the error-diffusion algorithm used to quantise to the

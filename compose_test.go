@@ -41,25 +41,30 @@ func TestCropToFillDimensions(t *testing.T) {
 	}
 }
 
-func TestComposeDimensions(t *testing.T) {
+func TestComposeDitheredStitches(t *testing.T) {
 	left := solidImage(600, 900, color.RGBA{R: 255, A: 255})
 	right := solidImage(1000, 700, color.RGBA{B: 255, A: 255})
 
-	out := compose(left, right)
+	out := composeDithered(left, right, ditherFloydSteinberg)
 	b := out.Bounds()
 	if b.Dx() != canvasWidth || b.Dy() != canvasHeight {
 		t.Fatalf("composite is %dx%d, want %dx%d", b.Dx(), b.Dy(), canvasWidth, canvasHeight)
 	}
 
-	// The left half should be (mostly) red and the right half blue, confirming
-	// the two images landed on their respective sides.
-	lr, _, _, _ := out.At(halfWidth/2, canvasHeight/2).RGBA()
-	_, _, rb, _ := out.At(halfWidth+halfWidth/2, canvasHeight/2).RGBA()
-	if lr < 0x8000 {
-		t.Errorf("left half not predominantly red (R=%d)", lr>>8)
-	}
-	if rb < 0x8000 {
-		t.Errorf("right half not predominantly blue (B=%d)", rb>>8)
+	// Each half of the stitched result must equal that half dithered on its own:
+	// stitchPaletted copies PEN indices verbatim, with no re-matching across the
+	// seam. Dithering is deterministic, so re-running it reproduces the indices.
+	wantL := ditherImage(cropToFill(left, halfWidth, halfHeight), ditherFloydSteinberg)
+	wantR := ditherImage(cropToFill(right, halfWidth, halfHeight), ditherFloydSteinberg)
+	for y := 0; y < canvasHeight; y++ {
+		for x := 0; x < halfWidth; x++ {
+			if got, want := out.ColorIndexAt(x, y), wantL.ColorIndexAt(x, y); got != want {
+				t.Fatalf("left half at (%d,%d): index %d, want %d", x, y, got, want)
+			}
+			if got, want := out.ColorIndexAt(halfWidth+x, y), wantR.ColorIndexAt(x, y); got != want {
+				t.Fatalf("right half at (%d,%d): index %d, want %d", x, y, got, want)
+			}
+		}
 	}
 }
 
