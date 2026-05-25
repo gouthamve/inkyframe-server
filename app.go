@@ -39,6 +39,18 @@ type App interface {
 	LastErr() error
 }
 
+// Navigator is an optional capability for apps whose content is an ordered,
+// navigable sequence (e.g. movie frames). When the active app implements it,
+// /next-image and /prev-image step forward and back through the sequence
+// deterministically and synchronously, instead of the default serve-then-
+// regenerate behaviour (which is right for apps like immich whose "next" is a
+// fresh random image). Both methods return the image now showing and clamp at
+// the ends. Apps that don't implement Navigator keep the default behaviour.
+type Navigator interface {
+	Next() (image []byte, builtAt time.Time)
+	Prev() (image []byte, builtAt time.Time)
+}
+
 // imageCache holds the most recent good image for one app along with the build
 // function that produces it. It implements the keep-last-good-image-on-failure
 // behaviour and is safe for concurrent use. Apps embed it and supply build.

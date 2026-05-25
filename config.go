@@ -18,12 +18,13 @@ type config struct {
 }
 
 // appConfig declares one app. Type selects the implementation; the matching
-// type-specific block (e.g. Immich) carries its settings. The block is a
+// type-specific block (e.g. Immich, Movie) carries its settings. The block is a
 // pointer so its absence is distinguishable from an empty block.
 type appConfig struct {
 	Name   string        `yaml:"name"`
 	Type   string        `yaml:"type"`
 	Immich *immichConfig `yaml:"immich"`
+	Movie  *movieConfig  `yaml:"movie"`
 }
 
 // immichConfig is the settings block for an "immich" app.
@@ -31,6 +32,17 @@ type immichConfig struct {
 	URL     string `yaml:"url"`
 	APIKey  string `yaml:"api_key"`
 	AlbumID string `yaml:"album_id"`
+}
+
+// movieConfig is the settings block for a "movie" app. Path is the video file;
+// frames are decoded on demand by seeking with ffmpeg. FPS is an optional
+// sampling rate — zero (the default) steps through every frame at the video's
+// native rate. StateFile, when set, persists the current frame index so a
+// restart resumes where it left off.
+type movieConfig struct {
+	Path      string  `yaml:"path"`
+	FPS       float64 `yaml:"fps"`
+	StateFile string  `yaml:"state_file"`
 }
 
 // rawConfig mirrors the on-disk YAML. Rotate is a pointer so an absent key
@@ -120,6 +132,17 @@ func validateApps(apps []appConfig) error {
 			if ic.URL == "" || ic.APIKey == "" || ic.AlbumID == "" {
 				return fmt.Errorf("app %q: immich requires url, api_key, and album_id", a.Name)
 			}
+		case "movie":
+			mc := a.Movie
+			if mc == nil {
+				return fmt.Errorf("app %q: missing movie config block", a.Name)
+			}
+			if mc.Path == "" {
+				return fmt.Errorf("app %q: movie requires path", a.Name)
+			}
+			if mc.FPS < 0 {
+				return fmt.Errorf("app %q: movie fps must be >= 0", a.Name)
+			}
 		case "":
 			return fmt.Errorf("app %q: type is required", a.Name)
 		default:
@@ -130,13 +153,17 @@ func validateApps(apps []appConfig) error {
 }
 
 // buildApps constructs the ordered App list from validated config. apps[0] is
-// the app active at startup. New app types are added here, keyed by type.
+// the app active at startup. New app types are added here, keyed by type. The
+// ditherer is built once from the configured algorithm and shared by every app.
 func buildApps(cfg config) ([]App, error) {
+	dith := newDitherer(cfg.Dither)
 	apps := make([]App, 0, len(cfg.Apps))
 	for _, ac := range cfg.Apps {
 		switch ac.Type {
 		case "immich":
-			apps = append(apps, newImmichApp(ac.Name, *ac.Immich, cfg.Dither))
+			apps = append(apps, newImmichApp(ac.Name, *ac.Immich, dith))
+		case "movie":
+			apps = append(apps, newMovieApp(ac.Name, *ac.Movie, dith))
 		default:
 			return nil, fmt.Errorf("app %q: unsupported type %q", ac.Name, ac.Type)
 		}

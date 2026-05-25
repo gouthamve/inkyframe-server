@@ -8,11 +8,12 @@ The server runs a configurable set of **apps**. Each app keeps its own image
 fresh in the background; the server tracks an **active app** and a **rotate**
 flag, and exposes endpoints that map to the frame's buttons.
 
-For now there is one app type, **immich**: it pulls two random images from an
-[Immich](https://immich.app) album, stitches them side-by-side, **dithers** the
-result to the frame's 7-colour palette on the server, and serves it as a packed
-**800×480 4bpp framebuffer** (or an indexed PNG for browsers — see
-[Firmware contract](#firmware-contract)).
+There are two app types. **immich** pulls two random images from an
+[Immich](https://immich.app) album and stitches them side-by-side. **movie**
+plays a local video file one frame at a time, advancing on the *Next Image*
+button. Either way the server **dithers** the result to the frame's 7-colour
+palette and serves it as a packed **800×480 4bpp framebuffer** (or an indexed PNG
+for browsers — see [Firmware contract](#firmware-contract)).
 
 ## How it works
 
@@ -47,6 +48,24 @@ aspect-preserving — no distortion, no letterbox). The composite is then dither
 into the framebuffer. Videos are ignored; an immich album must contain at least
 2 images.
 
+The **movie** app plays a whole local video file frame by frame, decoding **on
+demand**. It needs **ffmpeg** and **ffprobe** on the server's `PATH` (ffprobe
+ships with ffmpeg). At startup it probes the file for its frame rate and length;
+then on each step it seeks ffmpeg to the requested frame and decodes just that
+one frame — scaled/cropped to fill 800×480, dithered, and packed. Because only
+the current frame is held, memory stays low no matter how long the film is (a
+feature film would be ~26 GB if every frame were cached). By default it steps
+through **every** frame at the video's native rate; set `fps` to sample fewer
+(e.g. `fps: 2` jumps half a second per step). `GET /next-image` advances one
+frame and `GET /prev-image` steps back, both **clamped** at the ends (no
+wrap-around). `GET /image` shows the current frame *without* advancing — so with
+several apps and `rotate` on, the periodic wake still cycles between apps while
+the movie only moves when its button is pressed.
+
+If you set `state_file`, the current frame index is written there (atomically) on
+every step and restored on startup, so the movie **resumes where it left off**
+across restarts. The path must be writable.
+
 ## Configuration
 
 All configuration is a single YAML file, passed via `-config` (default
@@ -66,15 +85,23 @@ apps:
       url: https://immich.example.com   # Immich server base URL
       api_key: your-api-key             # needs asset.view + album read; keep secret
       album_id: your-album-uuid         # album to pull images from
-      jpeg_quality: 85                  # output JPEG quality 1-100 (default 85)
+
+  - name: holiday-clip
+    type: movie
+    movie:
+      path: /movies/holiday.mp4         # any ffmpeg-decodable video
+      # fps: 2                          # optional: sample N frames/sec; omit for native (every frame)
+      state_file: /state/holiday.idx    # optional: persist position to resume on restart (writable path)
 ```
 
 Top-level keys: `listen_addr`, `rotate`, `dither`, and a non-empty `apps` list.
 `dither` chooses the error-diffusion algorithm applied to every app's image:
 `floyd-steinberg` (default; smooth gradients) or `atkinson` (higher contrast,
-often cleaner on e-ink). Each app needs a unique `name` and a `type`; an `immich`
-app needs a `immich:` block with `url`, `api_key`, and `album_id`. Unknown keys
-are rejected so typos surface immediately.
+often cleaner on e-ink). Each app needs a unique `name` and a `type`. An `immich`
+app needs an `immich:` block with `url`, `api_key`, and `album_id`. A `movie` app
+needs a `movie:` block with a `path` (and optional `fps` and `state_file`) and
+requires `ffmpeg`/`ffprobe` on the server's `PATH`. Unknown keys are rejected so
+typos surface immediately.
 
 ## Run
 
@@ -106,11 +133,13 @@ docker run --rm -p 8080:8080 \
   ghcr.io/gouthamve/inkyframe-server:main
 ```
 
-It is a static [`distroless`](https://github.com/GoogleContainerTools/distroless)
-build that runs as a non-root user and reads its config from
+It is a Debian-slim image that bundles **ffmpeg** + **ffprobe** (required by the
+movie app) and runs as a non-root user, reading its config from
 `/etc/inkyframe/config.yaml`. Mount your own config there (it holds the API key,
-so it is never baked into the image); pass a different `-config` path if you
-mount it elsewhere. Available tags: `main` (rolling — latest commit on `main`),
+so it is never baked into the image), and mount any movie files the config
+references (read-only is fine); pass a different `-config` path if you mount it
+elsewhere. If a movie app sets `state_file`, mount a **writable** path for it so
+the resume position survives container restarts. Available tags: `main` (rolling — latest commit on `main`),
 `main-<commit>` (immutable — pins a specific `main` build),
 and `vX.Y.Z` / `vX.Y` / `latest` (release tags).
 
@@ -130,8 +159,8 @@ The `X-App` response header names the app that produced the image. See
 | `GET /image` (also `GET /`) | — | Active app's image; advances the active app if rotate is on |
 | `GET /next-app` | Next App | Advance to the next app; return its image |
 | `GET /prev-app` | Previous App | Move to the previous app; return its image |
-| `GET /next-image` | Next Image | Return the active app's image (and regenerate it) — each fetch shows a fresh one |
-| `GET /prev-image` | Previous Image | Return the active app's **previous** image (the one before the current), without regenerating |
+| `GET /next-image` | Next Image | Advance the active app's image. For a movie, step to the next frame (clamped at the last); otherwise return the current image and regenerate it, so each fetch shows a fresh one |
+| `GET /prev-image` | Previous Image | Step the active app's image back. For a movie, step to the previous frame (clamped at the first); otherwise return the **previous** image (the one before the current), without regenerating |
 | `GET /current-image` | — | Return the active app's current image **without** regenerating it |
 | `GET /toggle-rotate` | Toggle Rotate | Flip rotation on/off; return the active app's image |
 | `GET /healthz` | — | Per-app status + `rotate=…`; 503 only if no app has an image yet |
@@ -142,7 +171,9 @@ the last regeneration). `GET /prev-image` and `GET /current-image` are pure read
 every other image endpoint regenerates the served app's image in the background
 after responding, so the next fetch shows something new. Before the first
 regeneration there is no previous image, so `GET /prev-image` returns the current
-one.
+one. Apps with ordered content (the movie app) instead step deterministically and
+synchronously through their frames on `/next-image` and `/prev-image`, clamping at
+the first and last frame.
 
 ## Observability
 
@@ -220,6 +251,15 @@ palette. Algorithm is selectable via the top-level `dither` config key.
   one prepared for the next request can be at most one round-trip apart.
 - Source formats like HEIC work fine because images come from Immich's
   pre-rendered previews (JPEG/WebP) — no client-side HEIC/CGO decoder is needed.
+- The **movie** app requires `ffmpeg` and `ffprobe` on the server's `PATH` (the
+  Docker image bundles them). Frames are decoded **on demand** — one ffmpeg seek
+  per step — so memory stays low regardless of film length, at the cost of a
+  sub-second decode each time you step (fine for a frame that advances on a button
+  press). Seeking is by timestamp (`frame ÷ fps`), so on pathological
+  variable-frame-rate sources a step may land on an adjacent frame. Navigation
+  **clamps** at the first/last frame, the periodic `/image` wake does not advance
+  the movie — only the buttons do — and, with `state_file` set, the position is
+  persisted and resumed across restarts.
 - Output is **never JPEG**: lossy compression would smear the dithered pixels and
   shift colours off the 7-colour palette, so the server sends the raw framebuffer
   (or a lossless indexed PNG for browsers) instead.

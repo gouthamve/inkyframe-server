@@ -14,15 +14,15 @@ import (
 type immichApp struct {
 	client     *Client
 	albumID    string
-	algo       ditherAlgo // dithering algorithm for the composed image
-	imageCache            // embedded: refresh/regenerate/current/lastErr + locking
+	dith       *ditherer // shared ditherer for the composed image
+	imageCache           // embedded: refresh/regenerate/current/lastErr + locking
 }
 
-func newImmichApp(name string, cfg immichConfig, algo ditherAlgo) *immichApp {
+func newImmichApp(name string, cfg immichConfig, dith *ditherer) *immichApp {
 	a := &immichApp{
 		client:  NewClient(cfg.URL, cfg.APIKey),
 		albumID: cfg.AlbumID,
-		algo:    algo,
+		dith:    dith,
 	}
 	a.imageCache.name = name
 	a.imageCache.build = a.build
@@ -57,7 +57,7 @@ func (a *immichApp) build(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 
-	return packFramebuffer(composeDithered(left, right, a.algo)), nil
+	return packFramebuffer(composeDithered(a.dith, left, right)), nil
 }
 
 func (a *immichApp) Name() string                      { return a.imageCache.name }
