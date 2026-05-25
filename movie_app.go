@@ -8,6 +8,7 @@ import (
 	"image"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,8 +39,10 @@ const (
 // restart resumes where it left off.
 //
 // Unlike immich it does not embed imageCache: there is no per-serve build to
-// regenerate. It implements App directly plus Navigator, with its own mutex
-// guarding the frame index and cached frame.
+// regenerate. It implements App directly plus Navigator. navMu serializes
+// Next/Prev (so the index advances one frame at a time and the slow ffmpeg
+// decode runs without blocking readers), while the short-held mu guards the
+// current frame/index for Current/Previous/LastErr.
 type movieApp struct {
 	name      string
 	path      string
@@ -54,10 +57,12 @@ type movieApp struct {
 	vf          string                                             // ffmpeg scale-to-fill + crop filter
 	decode      func(ctx context.Context, idx int) ([]byte, error) // = ffmpegDecodeFrame; swapped in tests
 
-	mu       sync.Mutex
-	idx      int       // index of the frame currently showing
-	cachedFB []byte    // packed 4bpp framebuffer for idx
-	loadedAt time.Time // build time of cachedFB
+	navMu sync.Mutex // serializes Next/Prev; held across the decode
+
+	mu       sync.Mutex // guards the fields below; held only briefly, never across a decode
+	idx      int        // index of the frame currently showing
+	cachedFB []byte     // packed 4bpp framebuffer for idx
+	loadedAt time.Time  // build time of cachedFB
 	lastErr  error
 }
 
@@ -107,10 +112,13 @@ func (a *movieApp) load(ctx context.Context) error {
 	}
 
 	// Prefer the container's exact frame count when sampling at native rate;
-	// otherwise derive the count from duration × sampling fps.
+	// otherwise derive the count from duration × sampling fps. Round up so the
+	// final partial interval stays navigable rather than being truncated away
+	// (overshooting by one is harmless — that index just fails to decode and is
+	// clamped, see step).
 	total := nbFrames
 	if a.fps > 0 || total <= 0 {
-		total = int(duration * sfps)
+		total = int(math.Ceil(duration * sfps))
 	}
 	if total < 1 {
 		total = 1
@@ -178,43 +186,54 @@ func (a *movieApp) LastErr() error {
 }
 
 // Next advances one frame, clamping at the last, and returns the frame showing.
-func (a *movieApp) Next() ([]byte, time.Time) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.idx >= a.totalFrames-1 {
-		return a.cachedFB, a.loadedAt // already at the last frame
-	}
-	return a.step(a.idx + 1)
-}
+func (a *movieApp) Next() ([]byte, time.Time) { return a.step(+1) }
 
 // Prev steps back one frame, clamping at the first, and returns the frame showing.
-func (a *movieApp) Prev() ([]byte, time.Time) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.idx <= 0 {
-		return a.cachedFB, a.loadedAt // already at the first frame
-	}
-	return a.step(a.idx - 1)
-}
+func (a *movieApp) Prev() ([]byte, time.Time) { return a.step(-1) }
 
-// step decodes newIdx and, on success, makes it the current frame and persists
-// the position. On failure it keeps the current frame (records the error) so a
-// transient ffmpeg hiccup never blanks the display. Callers must hold a.mu.
-func (a *movieApp) step(newIdx int) ([]byte, time.Time) {
+// step moves the frame index by delta (±1), clamping at the ends, decodes the
+// new frame, and on success makes it current and persists the position. The slow
+// work — the ffmpeg decode and the state-file write — runs WITHOUT a.mu held, so
+// it never blocks readers (/image, /current-image, /healthz); a.mu is taken only
+// briefly to snapshot the current state and to commit the result. navMu
+// serializes concurrent steps so the index advances one frame at a time. On a
+// decode failure the current frame is kept (and the error recorded) so a
+// transient ffmpeg hiccup never blanks the display.
+func (a *movieApp) step(delta int) ([]byte, time.Time) {
+	a.navMu.Lock()
+	defer a.navMu.Unlock()
+
+	a.mu.Lock()
+	cur, total := a.idx, a.totalFrames
+	cfb, cat := a.cachedFB, a.loadedAt
+	a.mu.Unlock()
+
+	newIdx := cur + delta
+	if newIdx < 0 || newIdx >= total {
+		return cfb, cat // clamped at an end: nothing to decode
+	}
+
 	start := time.Now()
 	fb, err := a.decode(a.baseCtx, newIdx)
 	recordBuild(a.name, "navigate", err, time.Since(start))
 	if err != nil {
+		a.mu.Lock()
 		a.lastErr = err
-		log.Printf("movie %q: decode frame %d failed (keeping frame %d): %v", a.name, newIdx, a.idx, err)
-		return a.cachedFB, a.loadedAt
+		a.mu.Unlock()
+		log.Printf("movie %q: decode frame %d failed (keeping frame %d): %v", a.name, newIdx, cur, err)
+		return cfb, cat
 	}
+
+	now := time.Now()
+	a.mu.Lock()
 	a.idx = newIdx
 	a.cachedFB = fb
-	a.loadedAt = time.Now()
+	a.loadedAt = now
 	a.lastErr = nil
-	a.persist(newIdx)
-	return fb, a.loadedAt
+	a.mu.Unlock()
+
+	a.persist(newIdx) // file I/O; outside a.mu, navMu keeps writes ordered
+	return fb, now
 }
 
 // ffmpegDecodeFrame seeks to frame idx and decodes that single frame to a packed
