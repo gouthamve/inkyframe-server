@@ -51,7 +51,10 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /image", mgr.handleImage)
-	mux.HandleFunc("GET /{$}", mgr.handleImage) // root alias for /image
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}) // root: liveness only; /next-image moves the frame forward
 	mux.HandleFunc("GET /next-app", mgr.handleNextApp)
 	mux.HandleFunc("GET /prev-app", mgr.handlePrevApp)
 	mux.HandleFunc("GET /next-image", mgr.handleNextImage)
